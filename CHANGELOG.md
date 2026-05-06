@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-05-06
+
+### Added
+- Explicit ARM64 (Surface Pro X, Snapdragon Copilot+ PCs, Windows Dev Kit) support documentation in README.
+- About dialog now displays OS architecture and PowerShell version alongside the app version.
+
+### Notes
+- No code-path changes for ARM64 — the tool was already architecture-agnostic. This release makes that explicit and surfaces it in the UI.
+- Inno Setup config comments clarify that `x64compatible` covers both x64 and ARM64 install modes.
+
 ## [1.0.0] - 2026-05-06
 
 Initial public release.
