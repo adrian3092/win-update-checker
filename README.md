@@ -27,12 +27,14 @@ No installer. No telemetry. Pure PowerShell + WinForms — runs on any Windows 1
 
 ## Requirements
 
-- Windows 10 1809+ or Windows 11
-- PowerShell 5.1 (built into Windows) or PowerShell 7+
+- Windows 10 1809+ or Windows 11 — **x64 and ARM64 supported** (Surface Pro X, Snapdragon Copilot+ PCs, Windows Dev Kit, etc.). 32-bit Windows works too.
+- PowerShell 5.1 (built into Windows) or PowerShell 7+.
 - At least one of these for update detection:
   - [winget](https://learn.microsoft.com/windows/package-manager/winget/) — pre-installed on modern Windows; otherwise install **App Installer** from the Microsoft Store.
   - [Scoop](https://scoop.sh/) — optional.
   - [Chocolatey](https://chocolatey.org/) — optional.
+
+> The single installer / portable zip works on all three architectures. There are no native binaries — the tool is pure PowerShell + WinForms, both of which run natively on ARM64 Windows. winget, Scoop, and Chocolatey all support ARM64.
 
 ## Install
 

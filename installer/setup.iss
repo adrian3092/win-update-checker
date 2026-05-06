@@ -33,6 +33,9 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+; x64compatible covers both x64 and ARM64 — installs to {pf64} on either.
+; ArchitecturesAllowed is intentionally unset so the installer also runs on
+; legacy 32-bit Windows; the script itself is architecture-agnostic.
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
 UninstallDisplayIcon={app}\{#MyAppExeName}

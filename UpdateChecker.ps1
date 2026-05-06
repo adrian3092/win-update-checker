@@ -504,7 +504,7 @@ function Show-AboutDialog {
 
     $about = New-Object System.Windows.Forms.Form
     $about.Text = "About $($script:ProductName)"
-    $about.Size = New-Object System.Drawing.Size(440, 240)
+    $about.Size = New-Object System.Drawing.Size(540, 240)
     $about.FormBorderStyle = 'FixedDialog'
     $about.MaximizeBox = $false
     $about.MinimizeBox = $false
@@ -518,7 +518,9 @@ function Show-AboutDialog {
     $about.Controls.Add($title)
 
     $ver = New-Object System.Windows.Forms.Label
-    $ver.Text = "Version $($script:Version)"
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
+    $ver.Text = "Version $($script:Version)  -  $arch  -  PowerShell $($PSVersionTable.PSVersion.ToString())"
     $ver.Location = New-Object System.Drawing.Point(20, 55)
     $ver.AutoSize = $true
     $about.Controls.Add($ver)
@@ -539,7 +541,7 @@ function Show-AboutDialog {
     $ok = New-Object System.Windows.Forms.Button
     $ok.Text = 'OK'
     $ok.DialogResult = 'OK'
-    $ok.Location = New-Object System.Drawing.Point(330, 165)
+    $ok.Location = New-Object System.Drawing.Point(430, 165)
     $about.Controls.Add($ok)
     $about.AcceptButton = $ok
 
