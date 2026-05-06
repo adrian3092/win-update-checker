@@ -15,7 +15,7 @@
 ; AppId uniquely identifies this application. Regenerate ONCE for your own fork
 ; (Tools -> Generate GUID in the Inno Setup IDE) and never change it again, or
 ; uninstall/upgrade detection will break.
-AppId={60cbe8cd-e316-4bc8-9a92-96305ec2c7d2}
+AppId={{60cbe8cd-e316-4bc8-9a92-96305ec2c7d2}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
