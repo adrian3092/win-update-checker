@@ -58,7 +58,7 @@ param(
 # --- Constants --------------------------------------------------------------
 
 $script:ProductName = 'WinUpdateChecker'
-$script:Version     = '1.0.0'
+$script:Version     = '1.0.2'
 $script:RepoUrl     = 'https://github.com/adrian3092/win-update-checker'
 
 # --- Tool detection ---------------------------------------------------------

@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-06-04
+
+### Fixed
+- **Phantom update rows.** Name matching no longer collapses different product
+  editions together, so Visual C++ 2013 (v12) and stale leftover redistributable
+  entries are no longer falsely reported as updates to the 2015+ winget package.
+- **Duplicate entries.** Multiple installed entries that map to the same package
+  id now collapse into a single row (highest installed version wins).
+- **Silent upgrade failures.** Upgrades now capture the winget exit code and
+  report per-package success/failure (with a readable reason) instead of
+  swallowing the result, so a failed or no-op upgrade is no longer invisible.
+- **Stale in-app version.** `$script:Version` was still `1.0.0` on the 1.0.1
+  release; the About dialog and title bar now reflect the real version.
+
+### Added
+- Version-aware update detection: a row is only flagged when the available
+  version is genuinely newer than what's installed.
+- `tests/Merge.Tests.ps1` — assertion suite for the matching/merge logic, with a
+  dot-source guard so the script can be loaded for testing without launching the GUI.
+
 ## [1.0.1] - 2026-05-06
 
 ### Added
