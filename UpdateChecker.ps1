@@ -264,6 +264,83 @@ function Get-ChocoUpgrades {
     return $upgrades
 }
 
+# --- Matching helpers -------------------------------------------------------
+
+function Get-MatchBase {
+    # Normalize a program name for fuzzy matching. Strips a trailing dotted
+    # version (e.g. " - 14.44.35211") but PRESERVES edition tokens like "2013"
+    # or "2015-2022" so different product editions never collapse together.
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+    $b = $Name.ToLowerInvariant()
+    $b = $b -replace '\s*[-–]?\s*v?\d+\.\d[\d.]*\s*$', ''  # trailing dotted version
+    $b = $b -replace '…+$', ''                            # winget ellipsis truncation
+    $b = $b.TrimEnd(' ', '-', '(', '[', '/', '+')
+    return $b.Trim()
+}
+
+function Test-BasePrefixMatch {
+    # True when two normalized bases are equal, or one is a word-boundary prefix
+    # of the other. The prefix path handles winget's truncated names without
+    # matching unrelated products (e.g. "Edge" vs "EdgeWebView2").
+    param([string]$A, [string]$B)
+    if (-not $A -or -not $B) { return $false }
+    if ($A -eq $B) { return $true }
+    if ($A.Length -ge $B.Length) { $long = $A; $short = $B } else { $long = $B; $short = $A }
+    if ($short.Length -lt 6) { return $false }
+    if (-not $long.StartsWith($short, [System.StringComparison]::Ordinal)) { return $false }
+    $next = $long[$short.Length]
+    return ($next -eq ' ' -or $next -eq '(')
+}
+
+function Get-VersionValue {
+    # Parse a version-ish string into [version], or 0.0 when it can't be parsed.
+    param([string]$Text)
+    $v = $null
+    $clean = ($Text -replace '[^\d.]', '').Trim('.')
+    if ($clean -and [version]::TryParse($clean, [ref]$v)) { return $v }
+    return [version]'0.0'
+}
+
+function Test-IsNewerVersion {
+    # True when Available is strictly newer than Current. When either side can't
+    # be parsed as a version, assume an update IS available so real updates are
+    # never hidden by an odd version string.
+    param([string]$Current, [string]$Available)
+    $c = $null; $a = $null
+    $cClean = ($Current  -replace '[^\d.]', '').Trim('.')
+    $aClean = ($Available -replace '[^\d.]', '').Trim('.')
+    if ([version]::TryParse($cClean, [ref]$c) -and [version]::TryParse($aClean, [ref]$a)) {
+        return $a -gt $c
+    }
+    return $true
+}
+
+function Resolve-DuplicatePackageRows {
+    # Collapse multiple installed entries that map to the same package id into a
+    # single "Update available" row (keeping the highest installed version), so
+    # stale leftover registry entries don't show as separate phantom updates.
+    param([Parameter(Mandatory)] $Rows)
+    $kept = @{}
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($r in $Rows) {
+        $isUpdate = ($r.Status -like 'Update available*')
+        if (-not $isUpdate -or [string]::IsNullOrWhiteSpace($r.PackageId)) {
+            $result.Add($r); continue
+        }
+        $key = "$($r.PackageSource)|$($r.PackageId)"
+        if (-not $kept.ContainsKey($key)) {
+            $kept[$key] = $r
+            $result.Add($r)
+        } elseif ((Get-VersionValue $r.Current) -gt (Get-VersionValue $kept[$key].Current)) {
+            [void]$result.Remove($kept[$key])
+            $result.Add($r)
+            $kept[$key] = $r
+        }
+    }
+    return $result
+}
+
 # --- Merge ------------------------------------------------------------------
 
 function Merge-ProgramsAndUpgrades {
@@ -282,13 +359,11 @@ function Merge-ProgramsAndUpgrades {
             if ($up.Name -ieq $prog.Name) { $match = $up; break }
         }
         if (-not $match -and $prog.Name) {
-            $progLower = $prog.Name.ToLower()
-            $progBase  = ($progLower -replace '\s+\d+(\.\d+)*.*$','').Trim()
+            $progBase = Get-MatchBase $prog.Name
             foreach ($up in $Upgrades) {
                 if (-not $up.Name) { continue }
-                $upLower = $up.Name.ToLower()
-                $upBase  = ($upLower -replace '\s+\d+(\.\d+)*.*$','').Trim()
-                if ($progBase -and $upBase -and $progBase -eq $upBase) { $match = $up; break }
+                $upBase = Get-MatchBase $up.Name
+                if (Test-BasePrefixMatch $progBase $upBase) { $match = $up; break }
             }
         }
         if (-not $match -and $prog.Name) {
@@ -306,14 +381,18 @@ function Merge-ProgramsAndUpgrades {
 
         if ($match) {
             [void]$matchedKeys.Add("$($match.PackageSource)|$($match.Id)")
+            # Only flag an update when the available version is actually newer
+            # than what's installed. This stops phantom "updates" where winget
+            # keys off an older wrapper entry than the runtime you already have.
+            $isNewer = Test-IsNewerVersion -Current $prog.Version -Available $match.Available
             $rows.Add([pscustomobject]@{
                 Name          = $prog.Name
                 Publisher     = $prog.Publisher
                 Current       = $prog.Version
-                Available     = $match.Available
-                Status        = 'Update available'
-                PackageId     = $match.Id
-                PackageSource = $match.PackageSource
+                Available     = if ($isNewer) { $match.Available } else { '' }
+                Status        = if ($isNewer) { 'Update available' } else { 'Up to date / unknown' }
+                PackageId     = if ($isNewer) { $match.Id } else { '' }
+                PackageSource = if ($isNewer) { $match.PackageSource } else { '' }
             })
         } else {
             $status = if ($EnabledSources.Count -gt 0) { 'Up to date / unknown' } else { 'No package manager detected' }
@@ -343,34 +422,74 @@ function Merge-ProgramsAndUpgrades {
         })
     }
 
+    $rows = Resolve-DuplicatePackageRows -Rows $rows
     return $rows | Sort-Object @{ Expression = { if ($_.Status -like 'Update available*') { 0 } else { 1 } } }, Name
 }
 
 # --- Upgrade dispatch -------------------------------------------------------
 
+function Get-UpgradeExitMessage {
+    # Translate a package-manager exit code into a human-readable result so the
+    # GUI can tell the user WHY an upgrade did nothing instead of failing silently.
+    param([string]$Source, $ExitCode)
+    if ($null -eq $ExitCode) { return 'No exit code was returned by the installer.' }
+    $code = [int]$ExitCode
+    if ($code -eq 0) { return 'Succeeded.' }
+    if ($Source -eq 'winget') {
+        switch ($code) {
+            -1978335189 { return 'No applicable upgrade (already current, pinned, or version mismatch).' } # 0x8A15002B
+            -1978335212 { return 'No installed package matched for upgrade.' }                              # 0x8A150014
+            -1978334969 { return 'No installer applicable to this system.' }                               # 0x8A150107
+            1602        { return 'Installer cancelled.' }
+            1603        { return 'Fatal installer error (1603) — a newer version may already be present.' }
+            -2147023673 { return 'Operation cancelled (UAC prompt declined?).' }
+            default {
+                $hex = ('0x{0:X8}' -f ($code -band [uint32]::MaxValue))
+                return "winget exited with code $code ($hex)."
+            }
+        }
+    }
+    return "$Source exited with code $code."
+}
+
 function Invoke-PackageUpgrade {
     param(
         [Parameter(Mandatory)] [string]$Source,
-        [Parameter(Mandatory)] [string]$Id
+        [Parameter(Mandatory)] [string]$Id,
+        [string]$Name = $Id
     )
-    switch ($Source) {
-        'winget' {
-            Start-Process -FilePath 'winget' -ArgumentList @(
-                'upgrade','--id',$Id,
-                '--accept-package-agreements','--accept-source-agreements','-h'
-            ) -Verb RunAs -Wait
-        }
-        'scoop' {
-            Start-Process -FilePath 'powershell' -ArgumentList @(
-                '-NoProfile','-Command',"scoop update $Id"
-            ) -Wait
-        }
-        'chocolatey' {
-            Start-Process -FilePath 'choco' -ArgumentList @(
-                'upgrade',$Id,'-y'
-            ) -Verb RunAs -Wait
-        }
+    $result = [pscustomobject]@{
+        Name = $Name; Id = $Id; Source = $Source
+        Success = $false; ExitCode = $null; Message = ''
     }
+    try {
+        $proc = switch ($Source) {
+            'winget' {
+                Start-Process -FilePath 'winget' -ArgumentList @(
+                    'upgrade','--id',$Id,'--exact','--source','winget',
+                    '--accept-package-agreements','--accept-source-agreements',
+                    '--disable-interactivity','-h'
+                ) -Verb RunAs -Wait -PassThru
+            }
+            'scoop' {
+                Start-Process -FilePath 'powershell' -ArgumentList @(
+                    '-NoProfile','-Command',"scoop update $Id"
+                ) -Wait -PassThru
+            }
+            'chocolatey' {
+                Start-Process -FilePath 'choco' -ArgumentList @(
+                    'upgrade',$Id,'-y'
+                ) -Verb RunAs -Wait -PassThru
+            }
+        }
+        $result.ExitCode = $proc.ExitCode
+        $result.Success  = ($proc.ExitCode -eq 0)
+        $result.Message  = Get-UpgradeExitMessage -Source $Source -ExitCode $proc.ExitCode
+    } catch {
+        # Most commonly the user declined the UAC elevation prompt.
+        $result.Message = $_.Exception.Message
+    }
+    return $result
 }
 
 # --- Reporting --------------------------------------------------------------
@@ -717,6 +836,22 @@ function Show-Gui {
         Update-Grid
     }
 
+    function Show-UpgradeResults {
+        param($Results)
+        $Results = @($Results)
+        if (-not $Results) { return }
+        $ok   = @($Results | Where-Object { $_.Success })
+        $fail = @($Results | Where-Object { -not $_.Success })
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.AppendLine("Succeeded: $($ok.Count)    Failed: $($fail.Count)")
+        if ($fail.Count) {
+            [void]$sb.AppendLine('')
+            foreach ($f in $fail) { [void]$sb.AppendLine("- $($f.Name): $($f.Message)") }
+        }
+        $icon = if ($fail.Count) { 'Warning' } else { 'Information' }
+        [System.Windows.Forms.MessageBox]::Show($sb.ToString(), 'Upgrade results', 'OK', $icon) | Out-Null
+    }
+
     function Get-CheckedRows {
         $items = @()
         foreach ($row in $grid.Rows) {
@@ -764,7 +899,8 @@ function Show-Gui {
         }
         $msg = "Upgrade $($items.Count) package(s)?`r`n`r`n" + ($items | ForEach-Object { "$($_.Name)  ($($_.Source))" } | Out-String)
         if ([System.Windows.Forms.MessageBox]::Show($msg, 'Confirm', 'YesNo', 'Question') -ne 'Yes') { return }
-        foreach ($it in $items) { Invoke-PackageUpgrade -Source $it.Source -Id $it.Id }
+        $results = foreach ($it in $items) { Invoke-PackageUpgrade -Source $it.Source -Id $it.Id -Name $it.Name }
+        Show-UpgradeResults $results
         Refresh-Data
     })
 
@@ -777,7 +913,8 @@ function Show-Gui {
             return
         }
         if ([System.Windows.Forms.MessageBox]::Show("Upgrade ALL $($items.Count) available package(s)?", 'Confirm', 'YesNo', 'Question') -ne 'Yes') { return }
-        foreach ($it in $items) { Invoke-PackageUpgrade -Source $it.PackageSource -Id $it.PackageId }
+        $results = foreach ($it in $items) { Invoke-PackageUpgrade -Source $it.PackageSource -Id $it.PackageId -Name $it.Name }
+        Show-UpgradeResults $results
         Refresh-Data
     })
 
@@ -786,6 +923,10 @@ function Show-Gui {
 }
 
 # --- Main -------------------------------------------------------------------
+
+# When dot-sourced (e.g. from the test suite) the invocation name is '.', so the
+# functions above are loaded without launching the scanner or GUI.
+if ($MyInvocation.InvocationName -eq '.') { return }
 
 # CSV export shortcut
 if ($ExportCsv) {
