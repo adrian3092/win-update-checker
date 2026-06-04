@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-06-04
+
+### Security
+- **Validate package ids before upgrading.** `Invoke-PackageUpgrade` now rejects
+  any package id outside the safe identifier charset (`^[\w.+-]+$`) before
+  launching an installer. This closes a command-injection path where a crafted
+  package name parsed from `scoop status` output could have been interpolated
+  into a child-shell command. Whitelist validation is applied uniformly to the
+  winget, Scoop, and Chocolatey dispatch paths.
+
 ## [1.0.2] - 2026-06-04
 
 ### Fixed

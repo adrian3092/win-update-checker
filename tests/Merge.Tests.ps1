@@ -74,6 +74,23 @@ Assert-That ((Get-MatchBase 'Microsoft Visual C++ 2013 Redistributable (x64) - 1
 Assert-That ((Get-MatchBase 'Microsoft Visual C++ 2015-2022 Redistributable (…') -eq 'microsoft visual c++ 2015-2022 redistributable') 'winget ellipsis truncation stripped'
 Assert-That (-not (Test-BasePrefixMatch 'microsoft edge' 'microsoft edgewebview2 runtime')) 'Edge vs EdgeWebView2 do not prefix-match'
 
+Write-Host "`nPackage id validation" -ForegroundColor Cyan
+# Legitimate ids from every supported source must be accepted.
+Assert-That  (Test-SafePackageId 'Microsoft.VCRedist.2015+.x64') 'winget id with + and . accepted'
+Assert-That  (Test-SafePackageId 'Microsoft.DotNet.DesktopRuntime.8') 'winget dotnet id accepted'
+Assert-That  (Test-SafePackageId 'git.install') 'choco-style id accepted'
+Assert-That  (Test-SafePackageId 'extras-app_name') 'scoop-style id with _ and - accepted'
+# Injection attempts must be rejected.
+Assert-That (-not (Test-SafePackageId 'evil; calc.exe'))      'id with ; rejected'
+Assert-That (-not (Test-SafePackageId 'foo & shutdown'))      'id with & rejected'
+Assert-That (-not (Test-SafePackageId 'a$(rm -rf)'))          'id with $() rejected'
+Assert-That (-not (Test-SafePackageId 'a`nb'))                'id with backtick rejected'
+Assert-That (-not (Test-SafePackageId 'pkg with space'))      'id with space rejected'
+Assert-That (-not (Test-SafePackageId ''))                    'empty id rejected'
+# The dispatcher refuses a malicious id without launching any process.
+$blocked = Invoke-PackageUpgrade -Source 'scoop' -Id 'evil; calc.exe' -Name 'evil'
+Assert-That ($blocked.Success -eq $false -and $blocked.Message -like 'Refused:*') 'Invoke-PackageUpgrade blocks crafted id'
+
 Write-Host "`nExit-code messages" -ForegroundColor Cyan
 Assert-That ((Get-UpgradeExitMessage -Source 'winget' -ExitCode 0) -eq 'Succeeded.') 'exit 0 reads as success'
 Assert-That ((Get-UpgradeExitMessage -Source 'winget' -ExitCode -1978335189) -like 'No applicable upgrade*') 'UPDATE_NOT_APPLICABLE is explained'

@@ -58,7 +58,7 @@ param(
 # --- Constants --------------------------------------------------------------
 
 $script:ProductName = 'WinUpdateChecker'
-$script:Version     = '1.0.2'
+$script:Version     = '1.0.3'
 $script:RepoUrl     = 'https://github.com/adrian3092/win-update-checker'
 
 # --- Tool detection ---------------------------------------------------------
@@ -428,6 +428,16 @@ function Merge-ProgramsAndUpgrades {
 
 # --- Upgrade dispatch -------------------------------------------------------
 
+function Test-SafePackageId {
+    # Package ids are machine-generated identifiers (e.g. Microsoft.VCRedist.2015+.x64,
+    # dotnet-sdk, git.install). Restrict to that charset so a crafted name can never
+    # inject extra arguments or shell commands into an elevated installer call.
+    # Whitelist, not blacklist: anything with a space, quote, ';', '&', '$', '(', '`'
+    # or other metacharacter is rejected.
+    param([string]$Id)
+    return ($Id -match '^[\w.+-]+$')
+}
+
 function Get-UpgradeExitMessage {
     # Translate a package-manager exit code into a human-readable result so the
     # GUI can tell the user WHY an upgrade did nothing instead of failing silently.
@@ -462,6 +472,10 @@ function Invoke-PackageUpgrade {
         Name = $Name; Id = $Id; Source = $Source
         Success = $false; ExitCode = $null; Message = ''
     }
+    if (-not (Test-SafePackageId $Id)) {
+        $result.Message = 'Refused: package id contains unexpected characters.'
+        return $result
+    }
     try {
         $proc = switch ($Source) {
             'winget' {
@@ -472,6 +486,8 @@ function Invoke-PackageUpgrade {
                 ) -Verb RunAs -Wait -PassThru
             }
             'scoop' {
+                # $Id is interpolated into a child-shell command, so it MUST stay
+                # constrained to the safe id charset enforced by Test-SafePackageId above.
                 Start-Process -FilePath 'powershell' -ArgumentList @(
                     '-NoProfile','-Command',"scoop update $Id"
                 ) -Wait -PassThru
